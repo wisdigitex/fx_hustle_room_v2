@@ -1,3 +1,4 @@
+```python
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,12 +15,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
-from app.models import User
+from app.models import User, Base
+
+# ---------------------------------------------------
+# Streamlit page config
+# ---------------------------------------------------
 
 st.set_page_config(page_title="FX Hustle Room Admin", layout="wide")
 st.title("FX Hustle Room Admin Panel")
 
-# ✅ Neon requires SSL
+# ---------------------------------------------------
+# Database connection (Neon compatible)
+# ---------------------------------------------------
+
 engine = create_engine(
     settings.database_sync_url,
     pool_pre_ping=True,
@@ -27,10 +35,18 @@ engine = create_engine(
     future=True,
 )
 
+# Automatically create tables if they don't exist
+Base.metadata.create_all(engine)
 
+# ---------------------------------------------------
+# Cached data loading (faster dashboard)
+# ---------------------------------------------------
+
+@st.cache_data(ttl=60)
 def load_users(search: str = "") -> pd.DataFrame:
     try:
         with Session(engine) as session:
+
             stmt = select(User)
 
             if search:
@@ -41,7 +57,9 @@ def load_users(search: str = "") -> pd.DataFrame:
                     | (User.telegram_id.cast(String).ilike(term))
                 )
 
-            rows = session.execute(stmt.order_by(User.created_at.desc())).scalars().all()
+            rows = session.execute(
+                stmt.order_by(User.created_at.desc())
+            ).scalars().all()
 
             data = [
                 {
@@ -66,18 +84,29 @@ def load_users(search: str = "") -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=60)
 def metric_counts() -> tuple[int, int, int, int]:
     try:
         with Session(engine) as session:
+
             total = session.scalar(select(func.count()).select_from(User)) or 0
+
             deposit = session.scalar(
-                select(func.count()).select_from(User).where(User.deposit_confirmed.is_(True))
+                select(func.count())
+                .select_from(User)
+                .where(User.deposit_confirmed.is_(True))
             ) or 0
+
             trade = session.scalar(
-                select(func.count()).select_from(User).where(User.first_trade_completed.is_(True))
+                select(func.count())
+                .select_from(User)
+                .where(User.first_trade_completed.is_(True))
             ) or 0
+
             premium = session.scalar(
-                select(func.count()).select_from(User).where(User.premium_active.is_(True))
+                select(func.count())
+                .select_from(User)
+                .where(User.premium_active.is_(True))
             ) or 0
 
             return total, deposit, trade, premium
@@ -90,6 +119,7 @@ def metric_counts() -> tuple[int, int, int, int]:
 def manual_update(telegram_id: int, field: str, value: bool) -> None:
     try:
         with Session(engine) as session:
+
             user = session.execute(
                 select(User).where(User.telegram_id == telegram_id)
             ).scalar_one_or_none()
@@ -108,9 +138,10 @@ def manual_update(telegram_id: int, field: str, value: bool) -> None:
         st.error(f"Update failed: {e}")
 
 
-def proof_ids(telegram_id: int) -> tuple[str | None, str | None]:
+def proof_ids(telegram_id: int):
     try:
         with Session(engine) as session:
+
             user = session.execute(
                 select(User).where(User.telegram_id == telegram_id)
             ).scalar_one_or_none()
@@ -125,17 +156,23 @@ def proof_ids(telegram_id: int) -> tuple[str | None, str | None]:
         return None, None
 
 
-# Dashboard Metrics
+# ---------------------------------------------------
+# Dashboard metrics
+# ---------------------------------------------------
+
 total, deposit, trade, premium = metric_counts()
 
 col1, col2, col3, col4 = st.columns(4)
+
 col1.metric("Users", total)
 col2.metric("Deposit Approved", deposit)
 col3.metric("First Trade Approved", trade)
 col4.metric("Premium Active", premium)
 
+# ---------------------------------------------------
+# User table
+# ---------------------------------------------------
 
-# Search
 search = st.text_input("Search by username, name, or Telegram ID")
 
 df = load_users(search)
@@ -143,12 +180,19 @@ df = load_users(search)
 st.subheader("Users")
 st.dataframe(df, use_container_width=True)
 
+# ---------------------------------------------------
+# Manual admin actions
+# ---------------------------------------------------
 
-# Manual Updates
 st.subheader("Manual Actions")
 
 with st.form("manual_actions"):
-    telegram_id = st.number_input("Telegram ID", step=1, format="%d")
+
+    telegram_id = st.number_input(
+        "Telegram ID",
+        step=1,
+        format="%d"
+    )
 
     action = st.selectbox(
         "Action",
@@ -167,9 +211,13 @@ with st.form("manual_actions"):
     if submitted:
         manual_update(int(telegram_id), action, value)
         st.success("Updated")
+        st.cache_data.clear()
 
 
-# Proof lookup
+# ---------------------------------------------------
+# Proof viewer
+# ---------------------------------------------------
+
 st.subheader("Proof Viewer")
 
 proof_user_id = st.number_input(
@@ -180,6 +228,7 @@ proof_user_id = st.number_input(
 )
 
 if st.button("Load Proof IDs"):
+
     deposit_proof, trade_proof = proof_ids(int(proof_user_id))
 
     st.write(
@@ -191,6 +240,6 @@ if st.button("Load Proof IDs"):
 
     st.info(
         "These are Telegram file IDs. The bot can resend them, "
-        "but Streamlit cannot directly preview Telegram-hosted files "
-        "without downloading them through the Bot API."
+        "but Streamlit cannot directly preview Telegram-hosted files."
     )
+```
