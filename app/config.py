@@ -44,4 +44,11 @@ class Settings(BaseSettings):
         self.upload_path.mkdir(parents=True, exist_ok=True)
 
 
-settings = Settings()
+import os
+
+try:
+    import streamlit as st
+    env_values = {k: v for k, v in st.secrets.items()}
+    settings = Settings(**env_values)
+except Exception:
+    settings = Settings()
